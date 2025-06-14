@@ -1,1 +1,38 @@
 // Fill in JAS 1: Stack below
+
+.main
+
+IN 
+IN 
+DUP 
+DUP
+DUP
+DUP
+IN
+DUP // x y y y y y z z 
+BIPUSH 3 // x y y y y y z z 3
+IADD
+OUT // x y y y y y z 
+
+// print y + z
+IADD // x y y y y+z
+DUP // x y y y y+z y+z
+OUT // x y y y y+z
+
+// print z - y
+SWAP // x y y y+z y
+ISUB // x y y z
+SWAP // x y y z y 
+ISUB // x y y z-y
+DUP // x y y z-y z-y 
+OUT // x y y z-y
+
+IADD // x y z
+IADD // x y+z
+IADD // x+y+z
+BIPUSH 10
+ISUB // x+y+z-10
+OUT // []
+
+
+.end-main

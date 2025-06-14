@@ -1,1 +1,47 @@
 // Fill in JAS 3: Locals below
+
+.main
+    .var
+    x
+    y
+    z
+    .end-var
+
+    IN // x
+    ISTORE x
+    IN // y
+    ISTORE y
+    IN // z
+    ISTORE z
+
+
+    //print x + 3
+    ILOAD x // x
+    BIPUSH 3 // x 3
+    IADD // x+3
+    OUT // []
+
+    // print x + z
+    ILOAD x
+    ILOAD z
+    IADD
+    OUT
+
+    // print z - y
+    ILOAD z
+    ILOAD y
+    ISUB
+    OUT
+
+    // print x + y + z - 10
+    ILOAD x
+    ILOAD y
+    ILOAD z
+    IADD
+    IADD
+    BIPUSH 10
+    ISUB
+    OUT
+    HALT
+    
+.end-main
