@@ -20,10 +20,18 @@ typedef struct IJVM {
   //chapter 1
   byte *text; // pointer to the program text (bytecode)
   unsigned int text_size; // num of bytes in text
+
   word *constant_pool; // pointer to constant pool (array of 32-bit values)
   unsigned int constant_pool_count; // num of 32-bit vals (constants)
 
+  //chapter 2
+  word *stack;
+  unsigned int stack_size;
+  unsigned int stack_max;
+
+  unsigned int program_counter;
   
+  bool done;
 
 } ijvm;
 
