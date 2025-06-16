@@ -4,7 +4,7 @@
 #include "util.h" // read this file for debug prints, endianness helper functions
 
 #define STACK_CAPACITY 64 // max stack size (initally)
-#define EOF -1 // defining end of file for OP_IN case where there is no input (will output 0 in this case)
+//#define EOF -1 // defining end of file for OP_IN case where there is no input (will output 0 in this case)
 
 // see ijvm.h for descriptions of the below functions
 
@@ -133,11 +133,18 @@ unsigned int get_program_counter(ijvm* m)
 
 word tos(ijvm* m) 
 {
-  return m->stack[m->stack_size];
+  if (m->stack_size == 0) {
+    fprintf(stderr, "Stack is empty.\n");
+    exit(1);
+  }
+  return m->stack[m->stack_size - 1];
 }
 
 bool finished(ijvm* m) 
 {
+  if (m->program_counter >= m->text_size) {
+    m->done = true;
+  }
   return m->done;
 }
 
@@ -147,8 +154,8 @@ word get_local_variable(ijvm* m, int i)
   return 0;
 }
 
-void step(ijvm* m) 
-{
+void step(ijvm* m) {
+  
   byte instruction = m->text[m->program_counter];
   m->program_counter++;
   // TODO: implement me
@@ -165,29 +172,29 @@ void step(ijvm* m)
     }
     break;
     case OP_IADD: {
-      word a = pop(m);
       word b = pop(m);
+      word a = pop(m);
       word sum = a + b;
       push(m, sum);
     }
     break;
     case OP_IAND: {
-      word a = pop(m);
       word b = pop(m);
+      word a = pop(m);
       word bitwiseAnd = a & b;
       push(m, bitwiseAnd);
     }
     break;
     case OP_IOR: {
-      word a = pop(m);
       word b = pop(m);
+      word a = pop(m);
       word bitwiseOr = a | b;
       push(m, bitwiseOr);
     }
     break;
     case OP_ISUB: {
-      word a = pop(m);
       word b = pop(m);
+      word a = pop(m);
       word subVal = a - b;
       push(m, subVal);
     }
@@ -200,12 +207,13 @@ void step(ijvm* m)
     case OP_SWAP: {
       word a = pop(m);
       word b = pop(m);
-      push(m, b);
       push(m, a);
+      push(m, b);
     }
     break;
     case OP_ERR: {
       fprintf(m->out, "!!!Error!!!\n");
+      m->done = true;
     }
     break;
     case OP_HALT: {
@@ -225,11 +233,52 @@ void step(ijvm* m)
       break;
       case OP_OUT: {
         word outputValue = pop(m);
-        fprintf(m->out, outputValue);
+        fprintf(m->out, "%c", outputValue);
+      }
+      break;
+      
+
+      // chapter 3 cases
+      case OP_GOTO: {
+        int16_t jumpVal = (int16_t)((m->text[m->program_counter] << 8) + m->text[m->program_counter + 1]);
+        m->program_counter += 2; // move program counter val past location bytes
+        m->program_counter += jumpVal - 3; // shift program counter by the jumpval - the 3 bytes (intruction and value bytes)
+      }
+      break;
+      case OP_IFEQ: {
+        int16_t jumpVal = (int16_t)((m->text[m->program_counter] << 8) + m->text[m->program_counter + 1]);
+        m->program_counter += 2;
+        word val = pop(m);
+        if(val == 0){
+          m->program_counter += jumpVal - 3;
+        }
+      }
+      break;
+      case OP_IFLT: {
+        int16_t jumpVal = (int16_t)((m->text[m->program_counter] << 8) + m->text[m->program_counter + 1]);
+        m->program_counter += 2;
+        word val = pop(m);
+        if(val < 0){
+          m->program_counter += jumpVal -  3;
+        }
+      }
+      break;
+      case OP_IF_ICMPEQ: {
+        int16_t jumpVal = (int16_t)((m->text[m->program_counter] << 8) + m->text[m->program_counter + 1]);
+        m->program_counter += 2;
+
+        word b = pop(m);
+        word a = pop(m);
+        if (a == b){
+          m->program_counter += jumpVal - 3;
+        }
       }
       break;
     
-      default: break;
+      default:{
+        m->done = true;
+      } 
+      break;
     };
 }
 

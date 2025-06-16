@@ -9,6 +9,8 @@
  * All the state of your IJVM machine goes in this struct!
  **/
 
+typedef int32_t word;
+typedef uint8_t byte;
 typedef struct IJVM {
     // do not changes these two variables
     FILE *in;   // use fgetc(ijvm->in) to get a character from in.
@@ -17,6 +19,8 @@ typedef struct IJVM {
 
   // your variables go here
   
+  
+
   //chapter 1
   byte *text; // pointer to the program text (bytecode)
   unsigned int text_size; // num of bytes in text
