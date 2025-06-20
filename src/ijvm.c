@@ -159,7 +159,7 @@ word get_local_variable(ijvm* m, int i)
     fprintf(stderr, "local variable not found.");
     exit(1);
   }
-  return m->locals[m->lv + 1];
+  return m->locals[m->lv + i];
 }
 
 void step(ijvm* m) {
@@ -298,9 +298,16 @@ void step(ijvm* m) {
         byte index = m->text[m->program_counter];
         m->program_counter++;
         m->locals[m->lv + index] = pop(m);
-
       }
-
+      break;
+      case OP_IINC: {
+        byte index = m->text[m->program_counter];
+        m->program_counter++;
+        int8_t constant = (int8_t)m->text[m->program_counter];
+        m->program_counter++;
+        m->locals[m->lv + index] += constant;
+      }
+      break;
       case OP_WIDE: {
         byte wide_op = m->text[m->program_counter];
         m->program_counter++;
