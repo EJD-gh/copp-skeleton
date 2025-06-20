@@ -94,6 +94,10 @@ ijvm* init_ijvm(char *binary_path, FILE* input, FILE* output)
 
 
 
+  //chapter 4 things
+  m->lv_size = 256;
+  m->locals = calloc(m->lv_size, sizeof(word));
+  m->lv = 0;
 
   return m;
 }
@@ -103,6 +107,7 @@ void destroy_ijvm(ijvm* m)
   free(m->constant_pool);
   free(m->text);
   free(m->stack);
+  free(m->locals);
   free(m); // free memory for struct
 }
 
@@ -150,8 +155,11 @@ bool finished(ijvm* m)
 
 word get_local_variable(ijvm* m, int i) 
 {
-  // TODO: implement me
-  return 0;
+  if (i < 0 || m->lv + 1 >= m->lv_size) {
+    fprintf(stderr, "local variable not found.");
+    exit(1);
+  }
+  return m->locals[m->lv + 1];
 }
 
 void step(ijvm* m) {
@@ -221,13 +229,13 @@ void step(ijvm* m) {
     }
     break;
     case OP_IN: {
-      word ch = fgetc(m->in);
+      word character = fgetc(m->in);
 
-      if(ch == 0){
+      if(character == 0){
         push(m, 0);
       }
       else {
-        push(m, ch);
+        push(m, character);
       }
       }
       break;
@@ -274,12 +282,59 @@ void step(ijvm* m) {
         }
       }
       break;
-    
+      case OP_LDC_W: {
+        uint16_t index = read_int16(&m->text[m->program_counter]);
+        m->program_counter += 2;
+        push(m, get_constant(m, index));
+      }
+      break;
+      case OP_ILOAD: {
+        byte index = m->text[m->program_counter];
+        m->program_counter++;
+        push(m, m->locals[m->lv + index]);
+      }
+      break;
+      case OP_ISTORE: {
+        byte index = m->text[m->program_counter];
+        m->program_counter++;
+        m->locals[m->lv + index] = pop(m);
+
+      }
+
+      case OP_WIDE: {
+        byte wide_op = m->text[m->program_counter];
+        m->program_counter++;
+        uint16_t index = read_uint16(&m->text[m->program_counter]);
+        m->program_counter += 2;
+
+        switch (wide_op) {
+          case OP_ILOAD:
+            push(m, m->locals[m->lv + index]);
+            break;
+          case OP_ISTORE:
+            m->locals[m->lv + index] = pop(m);
+            break;
+          case OP_IINC: {
+            int8_t constant = (int8_t)m->text[m->program_counter];
+            m->program_counter++;
+            m->locals[m->lv + index] += constant;
+            break;
+          }
+          default:
+            fprintf(stderr, "Invalid WIDE instruction");
+            m->done = true;
+            break;
+        }
+        break;
+      }
       default:{
         m->done = true;
       } 
       break;
     };
+
+
+
 }
 
 byte get_instruction(ijvm* m) 

@@ -37,6 +37,13 @@ typedef struct IJVM {
   
   bool done;
 
+  //chapter 4
+
+  word* locals;
+  unsigned int lv;
+  unsigned int lv_size;
+  
+
 } ijvm;
 
 #endif 
