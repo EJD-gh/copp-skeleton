@@ -37,13 +37,17 @@ typedef struct IJVM {
   
   bool done;
 
-  //chapter 4
+  //chapter 4 + 5
 
   word* locals;
-  unsigned int lv;
-  unsigned int lv_size;
-  
+  unsigned int lv; // top used index + 1
+  unsigned int lv_max; // capacity
+  unsigned int new_lv;
 
+  word* control_data;
+  unsigned int control_size; // top used index + 1
+  unsigned int control_max; // capacity
+  
 } ijvm;
 
 #endif 

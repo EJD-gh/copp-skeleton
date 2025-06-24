@@ -95,10 +95,13 @@ ijvm* init_ijvm(char *binary_path, FILE* input, FILE* output)
 
 
   //chapter 4 things
-  m->lv_size = 256;
-  m->locals = calloc(m->lv_size, sizeof(word));
+  m->lv_max = 256;
+  m->locals = calloc(m->lv_max, sizeof(word));
   m->lv = 0;  
 
+  m->control_max = 256;
+  m->control_size = 0;
+  m->control_data = malloc(m->control_max * sizeof(word));
 
   return m;
 }
@@ -109,6 +112,7 @@ void destroy_ijvm(ijvm* m)
   free(m->text);
   free(m->stack);
   free(m->locals);
+  free(m->control_data);
   free(m); // free memory for struct
 }
 
@@ -156,7 +160,7 @@ bool finished(ijvm* m)
 
 word get_local_variable(ijvm* m, int i) 
 {
-  if (i < 0 || m->lv + 1 >= m->lv_size) {
+  if (i < 0 || m->lv + 1 >= m->lv_max) {
     fprintf(stderr, "local variable not found.");
     exit(1);
   }
@@ -339,28 +343,64 @@ void step(ijvm* m) {
         uint16_t method_index = read_uint16(&m->text[m->program_counter]);
         m->program_counter += 2;
 
-        uint32_t method_addr = get_constant(m, method_index);
-        uint16_t arg_count = read_uint16(&m->text[method_addr]);
-        (void)read_uint16(&m->text[method_addr + 2]); // local_count not used
+        uint32_t method_addr = get_constant(m, method_index); // method pc location
+        uint16_t arg_count = read_uint16(&m->text[method_addr]); // arg count
+        uint16_t local_count = read_uint16(&m->text[method_addr + 2]); // local variable count
 
-        int new_lv = m->stack_size - arg_count;
+        if (m->control_size + 2 > m->control_max) {
+          m->control_max *= 2; // double the capacity
+          m->control_data = realloc(m->control_data, m->control_max * sizeof(word));
+          if (m->control_data == NULL) {
+              fprintf(stderr, "Out of memory allocating control stack\n");
+              exit(1);
+          }
+        }
+
+        m->control_data[m->control_size] = m->program_counter;
+        m->control_data[m->control_size + 1] = m->lv;
+        m->control_size += 2;
+ 
+        m->new_lv = m->lv + arg_count + local_count; 
+
+        // Ensure locals array has enough space
+        if (m->new_lv > m->lv_max) {
+            while (m->lv_max < m->new_lv) {
+                m->lv_max *= 2;
+            }
+            word *tmp = realloc(m->locals, m->lv_max * sizeof(word));
+            if (!tmp) {
+                fprintf(stderr, "Failed to reallocate locals\n");
+                exit(1);
+            }
+            m->locals = tmp;
+        }
 
         printf("\n--- INVOKEVIRTUAL ---\n");
         printf("Method index: %u, Address: 0x%X\n", method_index, method_addr);
         printf("Arg count: %u\n", arg_count);
-        printf("Old LV: %d, New LV: %d\n", m->lv, new_lv);
+        printf("Old LV: %d, New LV: %d\n", m->lv, m->new_lv);
         printf("Return PC: %u\n", m->program_counter);
 
-        // Push return info in correct order
-        push(m, m->program_counter); // FIRST: return address
-        push(m, m->lv); // SECOND: previous lv
+        for (int i = arg_count - 1; i >= 0; --i) {
+          m->locals[m->lv + i] = pop(m);
+        }
 
-        for (int i = 0; i < arg_count; i++) {
-        m->locals[new_lv + i] = m->stack[new_lv + i];
-      }
+        if (m->new_lv > m->stack_max) {
+          while (m->stack_max < m->new_lv) {
+              m->stack_max *= 2;
+          }
+          word *tmp = realloc(m->stack, m->stack_max * sizeof(word));
+          if (!tmp) {
+              fprintf(stderr, "Failed to realloc stack.\n");
+              exit(1);
+          }
+          m->stack = tmp;
+        }
+        m->stack_size = m->new_lv;
+
 
         // Frame setup
-        m->lv = new_lv;
+        m->lv = m->new_lv;
         m->program_counter = method_addr + 4;
 
         // DEBUG
@@ -371,10 +411,6 @@ void step(ijvm* m) {
 
 
       case OP_IRETURN: {
-          if (m->stack_size < 3) {
-            fprintf(stderr, "Stack underflow in IRETURN!\n");
-            exit(1);
-          }
 
           // DEBUG: Print stack before IRETURN
           printf("\n--- IRETURN ---\n");
@@ -383,25 +419,30 @@ void step(ijvm* m) {
             printf("  [%d] = 0x%08X\n", i, m->stack[i]);
           }
 
-          // 1. Pop return value first (top of stack)
+          // op return value first (top of stack)
           word return_value = pop(m);
 
-          // 2. Retrieve return address and previous LV from frame
-          word prev_lv = pop(m);
-          word prev_pc = pop(m);
-          
+          if (m->control_size < 2) {
+            fprintf(stderr, "Control stack underflow in IRETURN.\n");
+            exit(1);
+          }
+
+          word prev_pc = m->control_data[m->control_size - 2];
+          word prev_lv = m->control_data[m->control_size - 1];
+          m->control_size -= 2;
+
 
           printf("Return value: 0x%08X\n", return_value);
           printf("Returning to PC: %u, restoring LV: %d\n", prev_pc, prev_lv);
 
-          // 3. Clear current frame: remove args, return_pc, and prev_lv
+          // Clear current frame: remove args, return_pc, and prev_lv
           m->stack_size = m->lv;
 
-          // 4. Restore previous frame
+          // Restore previous frame
           m->lv = prev_lv;
           m->program_counter = prev_pc;
 
-          // 5. Push return value to caller's frame
+          // Push return value to caller's frame
           push(m, return_value);
 
           // DEBUG: Stack after return
@@ -419,8 +460,6 @@ void step(ijvm* m) {
       } 
       break;
     };
-
-
 
 }
 
