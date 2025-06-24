@@ -97,7 +97,8 @@ ijvm* init_ijvm(char *binary_path, FILE* input, FILE* output)
   //chapter 4 things
   m->lv_size = 256;
   m->locals = calloc(m->lv_size, sizeof(word));
-  m->lv = 0;
+  m->lv = 0;  
+
 
   return m;
 }
@@ -334,6 +335,85 @@ void step(ijvm* m) {
         }
         break;
       }
+      case OP_INVOKEVIRTUAL: {
+        uint16_t method_index = read_uint16(&m->text[m->program_counter]);
+        m->program_counter += 2;
+
+        uint32_t method_addr = get_constant(m, method_index);
+        uint16_t arg_count = read_uint16(&m->text[method_addr]);
+        (void)read_uint16(&m->text[method_addr + 2]); // local_count not used
+
+        int new_lv = m->stack_size - arg_count;
+
+        printf("\n--- INVOKEVIRTUAL ---\n");
+        printf("Method index: %u, Address: 0x%X\n", method_index, method_addr);
+        printf("Arg count: %u\n", arg_count);
+        printf("Old LV: %d, New LV: %d\n", m->lv, new_lv);
+        printf("Return PC: %u\n", m->program_counter);
+
+        // Push return info in correct order
+        push(m, m->program_counter); // FIRST: return address
+        push(m, m->lv); // SECOND: previous lv
+
+        for (int i = 0; i < arg_count; i++) {
+        m->locals[new_lv + i] = m->stack[new_lv + i];
+      }
+
+        // Frame setup
+        m->lv = new_lv;
+        m->program_counter = method_addr + 4;
+
+        // DEBUG
+        printf("After frame setup: LV=%d, PC=%u\n", m->lv, m->program_counter);
+        printf("--- END INVOKEVIRTUAL ---\n\n");
+      }
+      break;
+
+
+      case OP_IRETURN: {
+          if (m->stack_size < 3) {
+            fprintf(stderr, "Stack underflow in IRETURN!\n");
+            exit(1);
+          }
+
+          // DEBUG: Print stack before IRETURN
+          printf("\n--- IRETURN ---\n");
+          printf("Stack before IRETURN (size %d):\n", m->stack_size);
+          for (int i = 0; i < m->stack_size; ++i) {
+            printf("  [%d] = 0x%08X\n", i, m->stack[i]);
+          }
+
+          // 1. Pop return value first (top of stack)
+          word return_value = pop(m);
+
+          // 2. Retrieve return address and previous LV from frame
+          word prev_lv = pop(m);
+          word prev_pc = pop(m);
+          
+
+          printf("Return value: 0x%08X\n", return_value);
+          printf("Returning to PC: %u, restoring LV: %d\n", prev_pc, prev_lv);
+
+          // 3. Clear current frame: remove args, return_pc, and prev_lv
+          m->stack_size = m->lv;
+
+          // 4. Restore previous frame
+          m->lv = prev_lv;
+          m->program_counter = prev_pc;
+
+          // 5. Push return value to caller's frame
+          push(m, return_value);
+
+          // DEBUG: Stack after return
+          printf("Stack after IRETURN (size %d):\n", m->stack_size);
+          for (int i = 0; i < m->stack_size; ++i) {
+            printf("  [%d] = 0x%08X\n", i, m->stack[i]);
+          }
+          printf("--- END IRETURN ---\n\n");
+
+          break;
+        }
+
       default:{
         m->done = true;
       } 
