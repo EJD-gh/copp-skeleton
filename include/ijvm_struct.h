@@ -43,6 +43,8 @@ typedef struct IJVM {
   unsigned int lv; // top used index + 1
   unsigned int lv_max; // capacity
   unsigned int new_lv;
+  unsigned int local_count; // number of local variables
+  unsigned int arg_count; // number of arguments
 
   word* control_data;
   unsigned int control_size; // top used index + 1

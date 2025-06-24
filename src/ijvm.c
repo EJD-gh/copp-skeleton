@@ -1,10 +1,8 @@
 #include <stdio.h>  // for getc, printf
 #include <stdlib.h> // malloc, free
-#include "ijvm.h"
+#include "ijvm.h" 
 #include "util.h" // read this file for debug prints, endianness helper functions
 
-#define STACK_CAPACITY 64 // max stack size (initally)
-//#define EOF -1 // defining end of file for OP_IN case where there is no input (will output 0 in this case)
 
 // see ijvm.h for descriptions of the below functions
 
@@ -86,7 +84,7 @@ ijvm* init_ijvm(char *binary_path, FILE* input, FILE* output)
 
  
   // chatper 2 stuff
-  m->stack_max = STACK_CAPACITY;
+  m->stack_max = 64;
   m->stack_size = 0;
   m->stack = malloc(m->stack_max * sizeof(word));
   m->program_counter = 0;
@@ -158,13 +156,26 @@ bool finished(ijvm* m)
   return m->done;
 }
 
-word get_local_variable(ijvm* m, int i) 
+word get_local_variable(ijvm* m, int i)
 {
-  if (i < 0 || m->lv + 1 >= m->lv_max) {
-    fprintf(stderr, "local variable not found.");
+  if (i < 0) {
+    fprintf(stderr, "Invalid local variable access: i=%d\n", i);
     exit(1);
   }
-  return m->locals[m->lv + i];
+  // If control stack is empty, we are in main(), so frame pointer is 0.
+  // Otherwise, the frame pointer is the last 'lv' saved on the control stack.
+  word frame_pointer;
+  if (m->control_size > 0) {
+        frame_pointer = m->control_data[m->control_size - 2];
+    } else {
+        frame_pointer = 0;
+    }
+
+  if (frame_pointer + i >= m->lv_max) {
+      fprintf(stderr, "Invalid local variable access: fp=%u, i=%d (max %u)\n", frame_pointer, i, m->lv_max);
+      exit(1);
+  }
+  return m->locals[frame_pointer + i];
 }
 
 void step(ijvm* m) {
@@ -234,13 +245,13 @@ void step(ijvm* m) {
     }
     break;
     case OP_IN: {
-      word character = fgetc(m->in);
+      int character = fgetc(m->in);
 
-      if(character == 0){
+      if(character == EOF){
         push(m, 0);
       }
       else {
-        push(m, character);
+        push(m, (word)character);
       }
       }
       break;
@@ -253,13 +264,13 @@ void step(ijvm* m) {
 
       // chapter 3 cases
       case OP_GOTO: {
-        int16_t jumpVal = (int16_t)((m->text[m->program_counter] << 8) + m->text[m->program_counter + 1]);
+        int16_t jumpVal = (int16_t)read_uint16(&m->text[m->program_counter]);
         m->program_counter += 2; // move program counter val past location bytes
         m->program_counter += jumpVal - 3; // shift program counter by the jumpval - the 3 bytes (intruction and value bytes)
       }
       break;
       case OP_IFEQ: {
-        int16_t jumpVal = (int16_t)((m->text[m->program_counter] << 8) + m->text[m->program_counter + 1]);
+        int16_t jumpVal = (int16_t)read_uint16(&m->text[m->program_counter]);
         m->program_counter += 2;
         word val = pop(m);
         if(val == 0){
@@ -268,7 +279,7 @@ void step(ijvm* m) {
       }
       break;
       case OP_IFLT: {
-        int16_t jumpVal = (int16_t)((m->text[m->program_counter] << 8) + m->text[m->program_counter + 1]);
+        int16_t jumpVal = (int16_t)read_uint16(&m->text[m->program_counter]);
         m->program_counter += 2;
         word val = pop(m);
         if(val < 0){
@@ -277,7 +288,7 @@ void step(ijvm* m) {
       }
       break;
       case OP_IF_ICMPEQ: {
-        int16_t jumpVal = (int16_t)((m->text[m->program_counter] << 8) + m->text[m->program_counter + 1]);
+        int16_t jumpVal = (int16_t)read_uint16(&m->text[m->program_counter]);
         m->program_counter += 2;
 
         word b = pop(m);
@@ -288,7 +299,7 @@ void step(ijvm* m) {
       }
       break;
       case OP_LDC_W: {
-        uint16_t index = read_int16(&m->text[m->program_counter]);
+        uint16_t index = read_uint16(&m->text[m->program_counter]);
         m->program_counter += 2;
         push(m, get_constant(m, index));
       }
@@ -296,21 +307,47 @@ void step(ijvm* m) {
       case OP_ILOAD: {
         byte index = m->text[m->program_counter];
         m->program_counter++;
-        push(m, m->locals[m->lv + index]);
+        word frame_pointer;
+        if (m->control_size > 0) {
+            frame_pointer = m->control_data[m->control_size - 2];
+        } 
+        else {
+            frame_pointer = 0;
+        }
+        push(m, m->locals[frame_pointer + index]);
       }
       break;
-      case OP_ISTORE: {
+       case OP_ISTORE: {
         byte index = m->text[m->program_counter];
         m->program_counter++;
-        m->locals[m->lv + index] = pop(m);
+        word frame_pointer;
+        if (m->control_size > 0) {
+            frame_pointer = m->control_data[m->control_size - 2];
+        } 
+        else {
+            frame_pointer = 0;
+        }
+        m->locals[frame_pointer + index] = pop(m);
+
+
+        if (frame_pointer + index >= m->lv) {
+            m->lv = frame_pointer + index + 1;
+        }
       }
       break;
       case OP_IINC: {
         byte index = m->text[m->program_counter];
         m->program_counter++;
-        int8_t constant = (int8_t)m->text[m->program_counter];
+        int16_t constant = (int8_t)m->text[m->program_counter];
         m->program_counter++;
-        m->locals[m->lv + index] += constant;
+        word frame_pointer;
+        if (m->control_size > 0) {
+            frame_pointer = m->control_data[m->control_size - 2];
+        } 
+        else {
+            frame_pointer = 0;
+        }
+        m->locals[frame_pointer + index] += constant;
       }
       break;
       case OP_WIDE: {
@@ -318,18 +355,29 @@ void step(ijvm* m) {
         m->program_counter++;
         uint16_t index = read_uint16(&m->text[m->program_counter]);
         m->program_counter += 2;
+        word frame_pointer;
+        if (m->control_size > 0) {
+            frame_pointer = m->control_data[m->control_size - 2];
+        } 
+        else {
+            frame_pointer = 0;
+        }
 
         switch (wide_op) {
           case OP_ILOAD:
-            push(m, m->locals[m->lv + index]);
+            push(m, m->locals[frame_pointer + index]);
             break;
           case OP_ISTORE:
-            m->locals[m->lv + index] = pop(m);
+            m->locals[frame_pointer + index] = pop(m);
+
+            if (frame_pointer + index >= m->lv) {
+                m->lv = frame_pointer + index + 1;
+            }
             break;
-          case OP_IINC: {
+          case OP_IINC: {            
             int8_t constant = (int8_t)m->text[m->program_counter];
             m->program_counter++;
-            m->locals[m->lv + index] += constant;
+            m->locals[frame_pointer + index] += constant;
             break;
           }
           default:
@@ -340,121 +388,61 @@ void step(ijvm* m) {
         break;
       }
       case OP_INVOKEVIRTUAL: {
+      
         uint16_t method_index = read_uint16(&m->text[m->program_counter]);
         m->program_counter += 2;
+        uint32_t method_addr = get_constant(m, method_index);
+        uint16_t arg_count = read_uint16(&m->text[method_addr]);
+        uint16_t local_count = read_uint16(&m->text[method_addr + 2]);
 
-        uint32_t method_addr = get_constant(m, method_index); // method pc location
-        uint16_t arg_count = read_uint16(&m->text[method_addr]); // arg count
-        uint16_t local_count = read_uint16(&m->text[method_addr + 2]); // local variable count
+        word new_frame_size = arg_count + local_count;
+        if (m->lv + new_frame_size > m->lv_max) {
+          m->lv_max *= 2; 
+          if (m->lv + new_frame_size > m->lv_max) { 
+             m->lv_max = m->lv + new_frame_size;
+          }
+          m->locals = realloc(m->locals, m->lv_max * sizeof(word));
+        }
 
         if (m->control_size + 2 > m->control_max) {
-          m->control_max *= 2; // double the capacity
-          m->control_data = realloc(m->control_data, m->control_max * sizeof(word));
-          if (m->control_data == NULL) {
-              fprintf(stderr, "Out of memory allocating control stack\n");
-              exit(1);
-          }
-        }
-
-        m->control_data[m->control_size] = m->program_counter;
-        m->control_data[m->control_size + 1] = m->lv;
-        m->control_size += 2;
- 
-        m->new_lv = m->lv + arg_count + local_count; 
-
-        // Ensure locals array has enough space
-        if (m->new_lv > m->lv_max) {
-            while (m->lv_max < m->new_lv) {
-                m->lv_max *= 2;
-            }
-            word *tmp = realloc(m->locals, m->lv_max * sizeof(word));
-            if (!tmp) {
-                fprintf(stderr, "Failed to reallocate locals\n");
+            m->control_max *= 2; 
+            m->control_data = realloc(m->control_data, m->control_max * sizeof(word));
+            if (m->control_data == NULL) {
+                fprintf(stderr, "Failed to resize control stack\n");
                 exit(1);
             }
-            m->locals = tmp;
         }
 
-        printf("\n--- INVOKEVIRTUAL ---\n");
-        printf("Method index: %u, Address: 0x%X\n", method_index, method_addr);
-        printf("Arg count: %u\n", arg_count);
-        printf("Old LV: %d, New LV: %d\n", m->lv, m->new_lv);
-        printf("Return PC: %u\n", m->program_counter);
+        m->control_data[m->control_size++] = m->lv;
+        m->control_data[m->control_size++] = m->program_counter;
 
         for (int i = arg_count - 1; i >= 0; --i) {
-          m->locals[m->lv + i] = pop(m);
+            m->locals[m->lv + i] = pop(m);
         }
 
-        if (m->new_lv > m->stack_max) {
-          while (m->stack_max < m->new_lv) {
-              m->stack_max *= 2;
-          }
-          word *tmp = realloc(m->stack, m->stack_max * sizeof(word));
-          if (!tmp) {
-              fprintf(stderr, "Failed to realloc stack.\n");
-              exit(1);
-          }
-          m->stack = tmp;
-        }
-        m->stack_size = m->new_lv;
+        m->lv += new_frame_size;
 
-
-        // Frame setup
-        m->lv = m->new_lv;
         m->program_counter = method_addr + 4;
-
-        // DEBUG
-        printf("After frame setup: LV=%d, PC=%u\n", m->lv, m->program_counter);
-        printf("--- END INVOKEVIRTUAL ---\n\n");
+        break;
       }
-      break;
-
-
       case OP_IRETURN: {
+        word return_value = pop(m);
 
-          // DEBUG: Print stack before IRETURN
-          printf("\n--- IRETURN ---\n");
-          printf("Stack before IRETURN (size %d):\n", m->stack_size);
-          for (int i = 0; i < m->stack_size; ++i) {
-            printf("  [%d] = 0x%08X\n", i, m->stack[i]);
-          }
-
-          // op return value first (top of stack)
-          word return_value = pop(m);
-
-          if (m->control_size < 2) {
-            fprintf(stderr, "Control stack underflow in IRETURN.\n");
-            exit(1);
-          }
-
-          word prev_pc = m->control_data[m->control_size - 2];
-          word prev_lv = m->control_data[m->control_size - 1];
-          m->control_size -= 2;
-
-
-          printf("Return value: 0x%08X\n", return_value);
-          printf("Returning to PC: %u, restoring LV: %d\n", prev_pc, prev_lv);
-
-          // Clear current frame: remove args, return_pc, and prev_lv
-          m->stack_size = m->lv;
-
-          // Restore previous frame
-          m->lv = prev_lv;
-          m->program_counter = prev_pc;
-
-          // Push return value to caller's frame
-          push(m, return_value);
-
-          // DEBUG: Stack after return
-          printf("Stack after IRETURN (size %d):\n", m->stack_size);
-          for (int i = 0; i < m->stack_size; ++i) {
-            printf("  [%d] = 0x%08X\n", i, m->stack[i]);
-          }
-          printf("--- END IRETURN ---\n\n");
-
-          break;
+        if (m->control_size < 2) {
+          fprintf(stderr, "Control stack underflow\n");
+          exit(1);
         }
 
+        word prev_pc = m->control_data[m->control_size - 1];
+        word prev_lv = m->control_data[m->control_size - 2];
+        m->control_size -= 2;
+
+        m->lv = prev_lv;
+        m->program_counter = prev_pc;
+
+        push(m, return_value);
+        break;
+      }
       default:{
         m->done = true;
       } 
